@@ -11,16 +11,12 @@ ik_to_motor_joint_map = {
     "left_shoulder_roll_joint": "LeftShoulderRoll",
     "left_shoulder_yaw_joint": "LeftShoulderYaw",
     "left_elbow_joint": "LeftElbow",
-    "left_wrist_roll_joint": "LeftWristRoll",
-    "left_wrist_pitch_joint": "LeftWristPitch",
-    "left_wrist_yaw_joint": "LeftWristYaw",
+
     "right_shoulder_pitch_joint": "RightShoulderPitch",
     "right_shoulder_roll_joint": "RightShoulderRoll",
     "right_shoulder_yaw_joint": "RightShoulderYaw",
     "right_elbow_joint": "RightElbow",
-    "right_wrist_roll_joint": "RightWristRoll",
-    "right_wrist_pitch_joint": "RightWristPitch",
-    "right_wrist_yaw_joint": "RightWristYaw",
+  
 }
 
 
@@ -45,16 +41,12 @@ def map_motor_state(motor_state):
         "RightShoulderRoll": "right_shoulder_roll_joint",
         "RightShoulderYaw": "right_shoulder_yaw_joint",
         "RightElbow": "right_elbow_joint",
-        "RightWristRoll": "right_wrist_roll_joint",
-        "RightWristPitch": "right_wrist_pitch_joint",
-        "RightWristYaw": "right_wrist_yaw_joint",
+     
         "LeftShoulderPitch": "left_shoulder_pitch_joint",
         "LeftShoulderRoll": "left_shoulder_roll_joint",
         "LeftShoulderYaw": "left_shoulder_yaw_joint",
         "LeftElbow": "left_elbow_joint",
-        "LeftWristRoll": "left_wrist_roll_joint",
-        "LeftWristPitch": "left_wrist_pitch_joint",
-        "LeftWristYaw": "left_wrist_yaw_joint",
+       
     }
     return {
         fk: motor_state[m]

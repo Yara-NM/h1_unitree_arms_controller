@@ -3,60 +3,66 @@ import time, math, csv, os
 from datetime import datetime
 
 from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize
-from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowCmd_, unitree_hg_msg_dds__LowState_
-from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
+from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowCmd_
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowCmd_, LowState_
 from unitree_sdk2py.utils.crc import CRC
 from unitree_sdk2py.utils.thread import RecurrentThread
 from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import MotionSwitcherClient
 
-G1_NUM_MOTOR = 30
+from . import unitree_legged_const  as h1
 
-LOWLEVEL = 0xFF
-PosStopF = 2.146e9
-VelStopF = 16000.0
+H1_NUM_MOTOR = 20
+
+
+# Joint mapping as a dictionary: joint name -> motor index
 
 # Joint mapping as a dictionary: joint name -> motor index
 
 joint_mapping = {
-    # Left Arm
-    "LeftShoulderPitch": 15,
-    "LeftShoulderRoll": 16,
-    "LeftShoulderYaw": 17,
-    "LeftElbow": 18,
-    "LeftWristRoll": 19,
-    "LeftWristPitch": 20,
-    "LeftWristYaw": 21,
-    # right Arm
-    "RightShoulderPitch": 22,
-    "RightShoulderRoll": 23,
-    "RightShoulderYaw": 24,
-    "RightElbow": 25,
-    "RightWristRoll": 26,
-    "RightWristPitch": 27,
-    "RightWristYaw": 28,
-    "WaistYaw": 12,
-    #weight
-    "NotUsedJoint": 29
+    "RightHipYaw": 8,
+    "RightHipRoll": 0,
+    "RightHipPitch": 1,
+    "RightKnee": 2,
+    "RightAnkle": 11,
+    "LeftHipYaw": 7,
+    "LeftHipRoll": 3,
+    "LeftHipPitch": 4,
+    "LeftKnee": 5,
+    "LeftAnkle": 10,
+    "WaistYaw": 6,
+    "NotUsedJoint": 9,
+    "RightShoulderPitch": 12,
+    "RightShoulderRoll": 13,
+    "RightShoulderYaw": 14,
+    "RightElbow": 15,
+    "LeftShoulderPitch": 16,
+    "LeftShoulderRoll": 17,
+    "LeftShoulderYaw": 18,
+    "LeftElbow": 19,
 }
 
-arm_joint_names = [
-    "LeftShoulderPitch", "LeftShoulderRoll", "LeftShoulderYaw", "LeftElbow",
-    "LeftWristRoll", "LeftWristPitch", "LeftWristYaw",
-    "RightShoulderPitch", "RightShoulderRoll", "RightShoulderYaw", "RightElbow",
-    "RightWristRoll", "RightWristPitch", "RightWristYaw","NotUsedJoint"
-]
-weak_motors_indices = list(joint_mapping.values())
+arm_joint_names = [ "LeftShoulderPitch", 
+                   "LeftShoulderRoll", 
+                   "LeftShoulderYaw", 
+                   "LeftElbow", 
+                   "RightShoulderPitch", 
+                   "RightShoulderRoll", 
+                   "RightShoulderYaw", 
+                   "RightElbow", 
+             ]
 
 
+# List of indices for weak motors (if needed for different PD gains)
+weak_motors_indices = [11, 10, 12, 13, 14, 15, 16, 17, 18, 19]
 
-class UnitreeG1ArmController: 
+
+class UnitreeH1ArmController: 
     def __init__(self, control_dt=0.02, results_dir=None, dds_topic="l"): 
 
         self.control_dt_ = control_dt
         self.target_positions = {joint: 0.0 for joint in arm_joint_names}
-        self.target_positions["NotUsedJoint"] = 1.0
 
-        self.low_cmd = unitree_hg_msg_dds__LowCmd_()
+        self.low_cmd = unitree_go_msg_dds__LowCmd_()
         self.low_state = None
         self.crc = CRC()
         self.time_ = 0.0
@@ -64,12 +70,20 @@ class UnitreeG1ArmController:
 
         # PD gains 
         # Per-joint gains
-        self.Kp_map = {joint: 35.0 for joint in arm_joint_names}
-        self.Kd_map = {joint: 1.0 for joint in arm_joint_names}
-        for joint in ["LeftWristRoll", "LeftWristPitch", "LeftWristYaw", "RightWristRoll", "RightWristPitch", "RightWristYaw"]:
-            self.Kp_map[joint] = 20.0
-            self.Kd_map[joint] = 0.8
+        self.Kp_init = 45.0
+        self.Kd_init = 3.3 
+
+        self.Kp_map = { "RightShoulderPitch": self.Kp_init,"RightShoulderRoll": self.Kp_init,
+                        "RightShoulderYaw": self.Kp_init,"RightElbow": self.Kp_init,
+                        "LeftShoulderPitch": self.Kp_init,"LeftShoulderRoll": self.Kp_init,
+                        "LeftShoulderYaw": self.Kp_init, "LeftElbow": self.Kp_init
+                        }
         
+        self.Kd_map =  { "RightShoulderPitch": self.Kd_init,"RightShoulderRoll": self.Kd_init,
+                        "RightShoulderYaw": self.Kd_init,"RightElbow": self.Kd_init,
+                        "LeftShoulderPitch": self.Kd_init,"LeftShoulderRoll": self.Kd_init,
+                        "LeftShoulderYaw": self.Kd_init, "LeftElbow": self.Kd_init
+                        }
 
         # Logs
         self.log_data = []
@@ -91,13 +105,17 @@ class UnitreeG1ArmController:
         
     def _init_low_cmd(self):
         # Set message header and default values.
-        self.low_cmd.level_flag = LOWLEVEL
+        self.low_cmd.head[0] = 0xFE
+        self.low_cmd.head[1] = 0xEF
+        self.low_cmd.level_flag = 0xFF
         self.low_cmd.gpio = 0
-        for i in range(G1_NUM_MOTOR):
-            
-            self.low_cmd.motor_cmd[i].mode = 0x01 if i in weak_motors_indices else 0x0A
-            self.low_cmd.motor_cmd[i].q = PosStopF
-            self.low_cmd.motor_cmd[i].dq = VelStopF
+        for i in range(H1_NUM_MOTOR):
+            if i in weak_motors_indices:
+                self.low_cmd.motor_cmd[i].mode = 0x01
+            else:
+                self.low_cmd.motor_cmd[i].mode = 0x0A
+            self.low_cmd.motor_cmd[i].q = h1.PosStopF
+            self.low_cmd.motor_cmd[i].dq = h1.VelStopF
             self.low_cmd.motor_cmd[i].kp = 0
             self.low_cmd.motor_cmd[i].kd = 0
             self.low_cmd.motor_cmd[i].tau = 0
@@ -112,10 +130,9 @@ class UnitreeG1ArmController:
         self.lowstate_subscriber = ChannelSubscriber("rt/lowstate", LowState_)
         self.lowstate_subscriber.Init(self._low_state_handler, 10)
 
-        if topic_type == "l":
-            self.msc = MotionSwitcherClient()
-            self.msc.SetTimeout(5.0)
-            self.msc.Init()
+        self.msc = MotionSwitcherClient()
+        self.msc.SetTimeout(5.0)
+        self.msc.Init()
             
 
     def _low_state_handler(self, msg: LowState_):
@@ -128,9 +145,7 @@ class UnitreeG1ArmController:
         for joint in arm_joint_names:
             q = self.low_state.motor_state[joint_mapping[joint]].q
             self.target_positions[joint] = q
-        self.target_positions["NotUsedJoint"] = 1.0
-            
-
+    
     
     def write_arm_command(self):
         """
@@ -142,9 +157,7 @@ class UnitreeG1ArmController:
             return
         
         log_entry = {"time": time.time()}
-        self.low_cmd.mode_pr = 0
-        self.low_cmd.mode_machine = self.low_state.mode_machine
-
+   
         # Update arm joints.
         for joint in arm_joint_names:
             idx = joint_mapping[joint]
@@ -162,7 +175,7 @@ class UnitreeG1ArmController:
             if self.logging_enabled:
                 log_entry[f"{joint}_target"] = target_q
                 log_entry[f"{joint}_pos"] = self.low_state.motor_state[idx].q
-                
+                # log_entry[f"{joint}_pos_raw"] = self.low_state.motor_state[idx].q_raw               
                 log_entry[f"{joint}_vel"] = self.low_state.motor_state[idx].dq
                 log_entry[f"{joint}_tau"] = self.low_state.motor_state[idx].tau_est
 
@@ -172,8 +185,15 @@ class UnitreeG1ArmController:
  
 
         # Update the weight pasrameter using NotUsedJoint.
-        self.low_cmd.motor_cmd[joint_mapping["NotUsedJoint"]].q = self.target_positions.get("NotUsedJoint", 1.0)
+        self.low_cmd.motor_cmd[joint_mapping["NotUsedJoint"]].q = 0.1
 
+        # idx_waist = joint_mapping["WaistYaw"]
+        # self.low_cmd.motor_cmd[idx_waist].q = 0.0
+        # self.low_cmd.motor_cmd[idx_waist].dq = 0.0
+        # self.low_cmd.motor_cmd[idx_waist].kp = 200
+        # self.low_cmd.motor_cmd[idx_waist].kd = 5.0
+        # self.low_cmd.motor_cmd[idx_waist].tau = 0.0
+        
         # Compute and attach the CRC.
         self.low_cmd.crc = self.crc.Crc(self.low_cmd)
         # Write the command over the high-level arm topic.
@@ -196,14 +216,7 @@ class UnitreeG1ArmController:
         self.running = False
         if self.control_thread is not None:
             self.control_thread.Wait()  # Proper way to request loop exit and join
-        self.release_arm_sdk()
-        
-        # Stop or join your control thread as appropriate.
-    def release_arm_sdk(self):
-        self.low_cmd.motor_cmd[joint_mapping["NotUsedJoint"]].q = 0.0
-        self.low_cmd.crc = self.crc.Crc(self.low_cmd)
-        self.armcmd_publisher.Write(self.low_cmd)
-
+      
     def read_motor_state(self):
         """
         Returns a dictionary of the current motor positions (radians) for arm joints.
@@ -225,6 +238,14 @@ class UnitreeG1ArmController:
             return {}
         return {joint: self.low_state.motor_state[idx].tau_est for joint, idx in joint_mapping.items()}
     
+    def read_raw_motor_state(self):
+        """
+        Returns a dictionary of the current motor positions (radians).
+        """
+        if self.low_state is None:
+            return {}
+        return {joint: self.low_state.motor_state[idx].q_raw for joint, idx in joint_mapping.items()}
+
     
     def update_target_positions(self, new_targets: dict):
         """ G1 SDK2, 
@@ -291,7 +312,7 @@ if __name__ == "__main__":
     time.sleep(0.5)
 
     print("[INFO] Initializing controller...")
-    controller = UnitreeG1ArmController(control_dt=0.02, dds_topic="l")
+    controller = UnitreeH1ArmController(control_dt=0.02, dds_topic="l")
     controller.start_control_loop()
     time.sleep(1.0)
 
@@ -299,7 +320,7 @@ if __name__ == "__main__":
     for joint in arm_joint_names:
         print(f"[TEST] Moving joint: {joint}")
         target = {j: 0.0 for j in arm_joint_names}
-        target[joint] = 0.2
+        target[joint] = 0.5
         controller.update_target_positions(target)
         time.sleep(2.0)
         target[joint] = -0.2
@@ -317,4 +338,3 @@ if __name__ == "__main__":
     
 
             
-

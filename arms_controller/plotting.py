@@ -25,11 +25,11 @@ import matplotlib
 matplotlib.use("Agg")  # Use non-GUI backend for headless environments
 
 # Define all G1 arm joints
-G1_ARM_JOINTS = [
+H1_ARM_JOINTS = [
     "LeftShoulderPitch", "LeftShoulderRoll", "LeftShoulderYaw", "LeftElbow",
-    "LeftWristRoll", "LeftWristPitch", "LeftWristYaw",
+   
     "RightShoulderPitch", "RightShoulderRoll", "RightShoulderYaw", "RightElbow",
-    "RightWristRoll", "RightWristPitch", "RightWristYaw"
+
 ]
 
 def plot_joint_log(csv_file, joint_names, results_dir=None):
@@ -78,6 +78,12 @@ def plot_joint_log(csv_file, joint_names, results_dir=None):
         axes[i, 2].plot(t, df.get(f"{joint}_tau", []))
         axes[i, 2].set_title(f"{joint} - Torque")
 
+        # axes[i, 3].plot(t, df.get(f"{joint}_pos", []), label="pos")
+        # axes[i, 3].plot(t, df.get(f"{joint}_pos_raw", []), "--", label="pos_raw")
+       
+        # axes[i, 3].set_title(f"{joint} - Position vs raw")
+        # axes[i, 3].legend()
+
 
     plt.tight_layout()
 
@@ -92,5 +98,5 @@ def plot_joint_log(csv_file, joint_names, results_dir=None):
 
 if __name__ == "__main__":
 
-    file_path = "/home/isr_lab/g1/arms_controller/results/joint_log_20250708_143109.csv"
-    plot_joint_log(file_path, G1_ARM_JOINTS)
+    file_path = "/home/isr_lab/h1/arms_controller/results/joint_log_20250723_045407.csv"
+    plot_joint_log(file_path, H1_ARM_JOINTS)
